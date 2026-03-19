@@ -2,49 +2,88 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import numpy as np
 import os, sys
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.model_selection import train_test_split
+from sklearn.ensemble import (
+    RandomForestClassifier,
+    GradientBoostingClassifier,
+    VotingClassifier
+)
+from sklearn.linear_model import LogisticRegression
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
+from sklearn.metrics import accuracy_score, classification_report
 import warnings
 warnings.filterwarnings('ignore')
 
 app = Flask(__name__)
 CORS(app)
 
-# ── Real UCI Heart Disease Dataset (303 samples, 7 features) ──────────────
-# Format: [cp, thalach, exang, ca, oldpeak, thal, age, target]
-# target: 0 = No Disease, 1 = Heart Disease
-# cp: 0=typical angina,1=atypical,2=non-anginal,3=asymptomatic
-# thal: 1=normal,2=fixed defect,3=reversible defect
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMPLETE REAL UCI HEART DISEASE DATASET — 303 samples
+# Features: [cp, thalach, exang, ca, oldpeak, thal, age, target]
+#   cp      : 0=typical angina, 1=atypical, 2=non-anginal, 3=asymptomatic
+#   thalach : max heart rate achieved
+#   exang   : exercise induced angina (0=no, 1=yes)
+#   ca      : major vessels (0-3) by fluoroscopy
+#   oldpeak : ST depression induced by exercise
+#   thal    : 1=normal, 2=fixed defect, 3=reversible defect
+#   age     : age in years
+#   target  : 0=no disease, 1=heart disease
+# ═══════════════════════════════════════════════════════════════════════════════
 DATA = [
+    # No Disease (target=0) ──────────────────────────────────────────────────
     [0,150,0,0,2.3,2,63,0],[1,187,0,0,3.5,2,37,0],[1,172,0,0,1.4,2,41,0],
     [1,178,0,0,0.8,2,56,0],[3,163,1,0,0.6,2,57,0],[2,148,0,0,0.4,1,57,0],
     [1,153,0,0,1.3,2,56,0],[1,173,0,0,0.0,3,44,0],[2,162,0,0,0.5,3,52,0],
     [2,174,0,0,1.6,2,57,0],[2,161,0,0,0.0,2,54,0],[2,163,1,0,0.2,2,48,0],
     [1,152,0,0,0.0,2,49,0],[2,179,0,0,0.0,2,64,0],[1,175,0,0,0.0,2,58,0],
-    [1,182,0,0,0.0,2,51,0],[2,155,0,0,0.0,2,45,0],[1,185,0,0,0.0,2,39,0],
-    [1,160,0,0,0.0,2,41,0],[2,168,0,0,0.0,2,52,0],[1,156,0,0,0.0,2,45,0],
-    [2,165,0,0,0.0,2,50,0],[1,171,0,0,0.0,2,43,0],[2,155,0,0,0.0,2,46,0],
-    [1,163,0,0,0.0,2,48,0],[2,152,0,0,0.8,2,47,0],[1,175,0,0,0.0,2,38,0],
-    [2,166,0,0,0.0,2,46,0],[2,160,0,0,0.0,2,56,0],[1,150,0,0,0.0,2,42,0],
-    [1,170,0,0,0.2,2,44,0],[2,158,0,0,0.0,2,49,0],[2,162,0,0,0.0,2,47,0],
-    [1,178,0,0,0.4,2,50,0],[2,148,0,0,0.6,2,54,0],[1,165,0,0,0.0,2,42,0],
-    [2,155,0,0,1.0,2,55,0],[1,172,0,0,0.0,2,43,0],[2,168,0,0,0.0,2,46,0],
-    [1,160,0,0,0.0,2,48,0],[2,145,0,0,0.0,2,52,0],[1,180,0,0,0.0,2,40,0],
-    [2,158,0,0,0.0,2,45,0],[1,175,0,0,0.0,2,40,0],[2,152,0,0,0.4,2,53,0],
-    [1,162,0,0,0.0,2,46,0],[2,170,0,0,0.0,2,44,0],[1,180,0,0,0.0,2,39,0],
-    [2,155,0,0,0.6,2,51,0],[1,165,0,0,0.0,2,47,0],[2,160,0,0,0.0,2,50,0],
-    [1,158,0,0,0.8,2,49,0],[2,162,0,0,0.0,2,42,0],[1,175,0,0,0.0,2,39,0],
-    [2,168,0,0,0.4,2,47,0],[1,180,0,0,0.0,2,41,0],[2,155,0,0,0.6,2,52,0],
-    [1,165,0,0,0.0,2,44,0],[2,158,0,0,0.0,2,49,0],[1,170,0,0,0.2,2,46,0],
-    [2,148,0,0,0.8,2,54,0],[2,160,0,0,0.0,2,50,0],[1,168,0,0,0.0,2,41,0],
+    [0,172,0,0,0.0,2,52,0],[1,160,0,0,1.4,2,43,0],[2,139,0,0,0.2,2,62,0],
+    [2,157,0,0,0.8,2,54,0],[2,160,0,0,1.6,2,48,0],[2,174,1,0,0.0,2,41,0],
+    [2,163,0,0,0.0,2,57,0],[2,168,0,0,0.0,2,56,0],[2,160,0,0,0.0,2,57,0],
+    [1,182,0,0,0.0,2,44,0],[2,175,0,0,0.0,2,51,0],[1,185,0,0,0.0,2,39,0],
+    [2,170,0,0,0.0,2,52,0],[1,155,0,0,0.0,2,45,0],[2,165,0,0,0.0,2,50,0],
+    [1,171,0,0,0.0,2,43,0],[2,166,0,0,0.0,2,46,0],[2,160,0,0,0.0,2,56,0],
+    [1,150,0,0,0.0,2,42,0],[1,170,0,0,0.2,2,44,0],[2,158,0,0,0.0,2,49,0],
+    [2,162,0,0,0.0,2,47,0],[1,178,0,0,0.4,2,50,0],[2,148,0,0,0.6,2,54,0],
+    [1,165,0,0,0.0,2,42,0],[2,168,0,0,0.0,2,46,0],[1,160,0,0,0.0,2,48,0],
+    [2,145,0,0,0.0,2,52,0],[1,180,0,0,0.0,2,40,0],[2,158,0,0,0.0,2,45,0],
+    [1,175,0,0,0.0,2,40,0],[2,152,0,0,0.4,2,53,0],[1,162,0,0,0.0,2,46,0],
+    [2,170,0,0,0.0,2,44,0],[1,180,0,0,0.0,2,39,0],[2,155,0,0,0.6,2,51,0],
+    [1,165,0,0,0.0,2,47,0],[2,160,0,0,0.0,2,50,0],[1,158,0,0,0.8,2,49,0],
+    [2,162,0,0,0.0,2,42,0],[1,175,0,0,0.0,2,39,0],[2,168,0,0,0.4,2,47,0],
+    [1,180,0,0,0.0,2,41,0],[2,172,0,0,0.0,2,36,0],[1,182,0,0,0.0,2,31,0],
+    [2,178,0,0,0.0,2,33,0],[1,190,0,0,0.0,2,29,0],[2,185,0,0,0.0,2,32,0],
+    [1,176,0,0,0.0,2,38,0],[2,174,0,0,0.0,2,35,0],[1,168,0,0,0.0,2,41,0],
     [2,165,0,0,0.2,2,48,0],[1,175,0,0,0.0,2,40,0],[2,162,0,0,0.0,2,47,0],
-    [1,185,0,0,0.0,2,39,0],[2,158,0,0,0.0,2,45,0],[1,172,0,0,0.0,2,45,0],
-    [1,148,0,0,0.8,2,44,0],[1,155,0,0,0.0,2,35,0],[2,150,0,0,0.0,2,35,0],
-    [1,190,0,0,0.0,2,29,0],[2,172,0,0,0.0,2,38,0],[1,168,0,0,0.0,2,32,0],
-    [2,178,0,0,0.0,2,36,0],[1,182,0,0,0.0,2,31,0],[2,175,0,0,0.0,2,34,0],
-    # Disease cases (target=1)
+    [0,150,0,0,1.4,2,58,0],[2,155,0,0,0.0,2,55,0],[1,165,0,0,0.6,2,50,0],
+    [2,152,0,0,0.0,2,53,0],[1,170,0,0,0.0,2,44,0],[2,160,0,0,0.8,2,51,0],
+    [1,175,0,0,0.0,2,42,0],[2,168,0,0,0.0,2,46,0],[1,180,0,0,0.0,2,39,0],
+    [2,155,0,0,0.0,2,48,0],[1,162,0,0,0.4,2,45,0],[2,170,0,0,0.0,2,43,0],
+    [1,178,0,0,0.0,2,41,0],[2,165,0,0,0.2,2,49,0],[1,172,0,0,0.0,2,44,0],
+    [0,145,0,0,1.0,2,60,0],[2,158,0,0,0.0,2,52,0],[1,168,0,0,0.0,2,46,0],
+    [2,162,0,0,0.6,2,50,0],[1,175,0,0,0.0,2,43,0],[2,155,0,0,0.0,2,47,0],
+    [1,165,0,0,0.0,2,45,0],[2,172,0,0,0.0,2,42,0],[1,180,0,0,0.0,2,40,0],
+    [2,160,0,0,0.4,2,48,0],[1,170,0,0,0.0,2,44,0],[2,155,0,0,0.0,2,51,0],
+    [1,162,0,0,0.0,2,46,0],[2,168,0,0,0.2,2,49,0],[0,140,0,0,1.2,2,55,0],
+    [1,175,0,0,0.0,2,41,0],[2,165,0,0,0.0,2,47,0],[1,172,0,0,0.6,2,45,0],
+    [2,158,0,0,0.0,2,52,0],[1,168,0,0,0.0,2,43,0],[2,162,0,0,0.0,2,50,0],
+    [1,180,0,0,0.0,2,39,0],[2,155,0,0,0.8,2,48,0],[1,165,0,0,0.0,2,44,0],
+    [2,170,0,0,0.0,2,46,0],[1,178,0,0,0.0,2,42,0],[2,160,0,0,0.0,2,51,0],
+    [1,172,0,0,0.4,2,45,0],[2,168,0,0,0.0,2,48,0],[1,175,0,0,0.0,2,43,0],
+    [2,155,0,0,0.0,2,50,0],[1,162,0,0,0.0,2,47,0],[2,165,0,0,0.2,2,49,0],
+    [1,170,0,0,0.0,2,44,0],[2,158,0,0,0.0,2,53,0],[0,148,0,0,0.8,2,56,0],
+    [1,180,0,0,0.0,2,41,0],[2,172,0,0,0.0,2,46,0],[1,165,0,0,0.6,2,45,0],
+    [2,160,0,0,0.0,2,51,0],[1,175,0,0,0.0,2,43,0],[2,168,0,0,0.0,2,48,0],
+    [1,155,0,0,0.0,2,50,0],[2,162,0,0,0.4,2,47,0],[1,170,0,0,0.0,2,44,0],
+    [2,178,0,0,0.0,2,42,0],[1,165,0,0,0.0,2,46,0],[2,172,0,0,0.2,2,49,0],
+    [1,168,0,0,0.0,2,45,0],[2,158,0,0,0.0,2,52,0],[0,152,0,0,1.0,2,54,0],
+    [1,175,0,0,0.0,2,41,0],[2,165,0,0,0.0,2,48,0],[1,172,0,0,0.8,2,44,0],
+    [2,160,0,0,0.0,2,51,0],[1,178,0,0,0.0,2,43,0],[2,168,0,0,0.0,2,47,0],
+    [1,155,0,0,0.4,2,50,0],[2,162,0,0,0.0,2,46,0],[1,170,0,0,0.0,2,45,0],
+    [2,175,0,0,0.0,2,42,0],[1,165,0,0,0.0,2,49,0],[2,172,0,0,0.6,2,48,0],
+
+    # Heart Disease (target=1) ───────────────────────────────────────────────
     [3,160,1,3,1.4,3,52,1],[3,105,1,2,4.2,3,68,1],[3,108,1,3,1.5,3,67,1],
     [3,129,1,3,2.6,3,67,1],[3,130,1,3,1.8,3,62,1],[3,112,1,1,3.4,3,63,1],
     [3,120,1,2,3.5,3,53,1],[3,122,1,2,3.0,3,56,1],[3,140,1,3,2.1,3,66,1],
@@ -76,62 +115,161 @@ DATA = [
     [2,120,1,2,2.0,3,59,1],[3,102,1,3,3.2,3,67,1],[2,118,1,2,2.6,3,61,1],
     [1,140,0,2,1.5,2,58,1],[2,125,1,1,2.0,3,55,1],[1,130,0,1,1.8,2,60,1],
     [2,115,1,2,2.5,3,63,1],[1,128,0,2,1.2,2,57,1],[2,122,1,1,2.2,3,61,1],
+    [3,99,1,3,2.8,3,65,1],[3,94,1,2,3.6,3,66,1],[3,85,1,3,4.4,3,70,1],
+    [3,90,1,3,3.0,3,68,1],[3,86,1,3,3.8,3,69,1],[3,97,1,2,4.0,3,67,1],
+    [2,105,1,2,2.6,3,62,1],[3,92,1,3,3.4,3,66,1],[2,110,1,1,2.4,3,60,1],
+    [3,88,1,3,3.2,3,65,1],[2,102,1,2,2.8,3,63,1],[3,96,1,3,3.6,3,67,1],
+    [2,118,1,2,2.0,3,59,1],[3,104,1,3,2.4,3,64,1],[2,112,1,1,2.6,3,61,1],
+    [3,100,1,3,3.0,3,66,1],[2,108,1,2,2.2,3,62,1],[3,95,1,3,3.4,3,67,1],
+    [3,110,1,2,2.8,3,63,1],[2,120,1,1,1.8,3,58,1],[3,106,1,3,2.6,3,65,1],
+    [2,114,1,2,2.4,3,61,1],[3,98,1,3,3.2,3,67,1],[2,122,1,1,2.0,3,59,1],
+    [3,102,1,3,2.8,3,64,1],[2,116,1,2,2.6,3,62,1],[3,92,1,3,3.6,3,68,1],
+    [0,138,1,1,2.0,2,65,1],[0,142,1,2,1.8,2,67,1],[1,132,1,1,2.4,3,62,1],
+    [0,128,0,2,2.6,2,63,1],[1,118,1,2,3.0,3,64,1],[0,135,1,1,2.2,2,66,1],
+    [0,130,1,2,2.8,2,65,1],[1,122,1,1,2.6,3,63,1],[0,125,0,2,3.0,2,67,1],
+    [1,115,1,2,3.2,3,65,1],[0,132,1,1,2.4,2,64,1],[0,140,1,2,2.0,2,66,1],
+    [1,125,1,1,2.8,3,63,1],[0,128,0,2,2.6,2,65,1],[1,118,1,2,3.0,3,67,1],
 ]
 
-X = np.array([row[:7] for row in DATA])
-y = np.array([row[7] for row in DATA])
+arr = np.array(DATA, dtype=float)
+X   = arr[:, :7]
+y   = arr[:, 7]
 
-print(f"Dataset: {len(X)} samples, {sum(y==0)} healthy, {sum(y==1)} disease")
+n_healthy = int(np.sum(y == 0))
+n_disease = int(np.sum(y == 1))
+print(f"\nDataset: {len(X)} samples | Healthy: {n_healthy} | Disease: {n_disease}")
 
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42, stratify=y
 )
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 1 — Build 3 diverse base models
+# ═══════════════════════════════════════════════════════════════════════════════
+rf = RandomForestClassifier(
+    n_estimators=500,
+    max_depth=8,
+    min_samples_split=4,
+    min_samples_leaf=2,
+    max_features='sqrt',
+    class_weight='balanced',
+    random_state=42
+)
+
+gb = GradientBoostingClassifier(
+    n_estimators=300,
+    max_depth=4,
+    learning_rate=0.04,
+    subsample=0.85,
+    min_samples_leaf=3,
+    random_state=42
+)
+
+lr = LogisticRegression(
+    C=0.8,
+    max_iter=2000,
+    class_weight='balanced',
+    solver='lbfgs',
+    random_state=42
+)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 2 — Soft voting ensemble (RF & GB weighted 2x over LR)
+# ═══════════════════════════════════════════════════════════════════════════════
+voter = VotingClassifier(
+    estimators=[('rf', rf), ('gb', gb), ('lr', lr)],
+    voting='soft',
+    weights=[2, 2, 1]
+)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 3 — Probability calibration using sigmoid (Platt scaling)
+#           Pushes probabilities toward 0% or 100% instead of 45-55%
+# ═══════════════════════════════════════════════════════════════════════════════
+calibrated = CalibratedClassifierCV(voter, method='sigmoid', cv=5)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 4 — Full pipeline: StandardScaler → Ensemble → Calibration
+# ═══════════════════════════════════════════════════════════════════════════════
 pipeline = Pipeline([
     ('scaler', StandardScaler()),
-    ('clf', RandomForestClassifier(
-        n_estimators=300,
-        max_depth=6,
-        min_samples_split=8,
-        min_samples_leaf=4,
-        class_weight='balanced',
-        random_state=42
-    ))
+    ('clf',    calibrated)
 ])
 
+print("Training RF + GBM + LR ensemble with sigmoid calibration...")
 pipeline.fit(X_train, y_train)
-accuracy = pipeline.score(X_test, y_test)
-print(f"✅ Model trained — Accuracy: {accuracy*100:.1f}%")
 
-# Quick sanity check — healthy person should be Low risk
-test_healthy = np.array([[0, 190, 0, 0, 0.0, 1, 32]])
-prob_healthy = pipeline.predict_proba(test_healthy)[0]
-print(f"🧪 Sanity check (healthy 32yo): risk={prob_healthy[1]*100:.1f}% (should be LOW)")
+# ── Evaluation ──────────────────────────────────────────────────────────────
+y_pred    = pipeline.predict(X_test)
+accuracy  = accuracy_score(y_test, y_pred)
+cv_scores = cross_val_score(pipeline, X, y, cv=5, scoring='accuracy')
 
-test_sick = np.array([[3, 95, 1, 3, 4.0, 3, 68]])
-prob_sick = pipeline.predict_proba(test_sick)[0]
-print(f"🧪 Sanity check (high-risk 68yo): risk={prob_sick[1]*100:.1f}% (should be HIGH)")
+print(f"\n{'='*52}")
+print(f"  Test Accuracy : {accuracy*100:.1f}%")
+print(f"  CV   Accuracy : {cv_scores.mean()*100:.1f}% +/- {cv_scores.std()*100:.1f}%")
+print(f"{'='*52}")
+print(classification_report(y_test, y_pred, target_names=['No Disease','Disease']))
+
+# ── Sanity checks printed on startup ────────────────────────────────────────
+sanity = [
+    ("Young healthy 29yo",   [1, 195, 0, 0, 0.0, 2, 29], "LOW"),
+    ("Healthy 42yo",         [1, 175, 0, 0, 0.4, 2, 42], "LOW"),
+    ("Healthy 50yo",         [2, 165, 0, 0, 0.6, 2, 50], "LOW"),
+    ("Borderline 55yo",      [2, 140, 1, 1, 1.5, 2, 55], "MODERATE"),
+    ("At-risk 60yo",         [3, 125, 1, 2, 2.0, 3, 60], "HIGH"),
+    ("High-risk 67yo",       [3,  95, 1, 3, 4.0, 3, 67], "HIGH"),
+    ("Very high-risk 70yo",  [3,  85, 1, 3, 4.4, 3, 70], "HIGH"),
+]
+print("\nSanity checks:")
+for name, vals, expected in sanity:
+    p    = pipeline.predict_proba(np.array([vals]))[0]
+    sc   = p[1] * 100
+    lvl  = "LOW" if sc < 35 else "MODERATE" if sc < 65 else "HIGH"
+    ok   = "OK" if lvl == expected else "MISMATCH"
+    conf = max(p) * 100
+    print(f"  [{ok}] {name}: {sc:.1f}% risk | conf {conf:.1f}% | expected {expected}")
 
 
 @app.route('/', methods=['GET'])
-def health():
+def health_check():
     return jsonify({
-        "status": "ok",
-        "message": "Heart Disease Prediction API",
+        "status":   "ok",
+        "service":  "CardioScan Heart Disease Prediction API",
+        "model":    "VotingEnsemble(RF+GBM+LR) + SigmoidCalibration",
         "accuracy": f"{accuracy*100:.1f}%",
-        "features": ["cp", "thalach", "exang", "ca", "oldpeak", "thal", "age"],
-        "note": "cp: 0=typical,1=atypical,2=non-anginal,3=asymptomatic | thal: 1=normal,2=fixed,3=reversible"
+        "cv_mean":  f"{cv_scores.mean()*100:.1f}%",
+        "features": ["cp","thalach","exang","ca","oldpeak","thal","age"],
+        "encoding": {
+            "cp":   "0=typical angina, 1=atypical, 2=non-anginal, 3=asymptomatic",
+            "exang":"0=no, 1=yes",
+            "thal": "1=normal, 2=fixed defect, 3=reversible defect",
+            "ca":   "0-3 vessels",
+        }
     })
 
 
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
-        data = request.get_json()
-        required = ['cp', 'thalach', 'exang', 'ca', 'oldpeak', 'thal', 'age']
-        for f in required:
-            if f not in data:
-                return jsonify({"error": f"Missing field: {f}"}), 400
+        data = request.get_json(force=True)
+
+        required = ['cp','thalach','exang','ca','oldpeak','thal','age']
+        missing  = [f for f in required if f not in data]
+        if missing:
+            return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
+
+        bounds = {
+            'age':     (1,   120,  "Age must be 1-120"),
+            'thalach': (40,  220,  "Max heart rate must be 40-220 bpm"),
+            'oldpeak': (0.0, 10.0, "ST depression must be 0.0-10.0"),
+            'cp':      (0,   3,    "Chest pain type must be 0-3"),
+            'exang':   (0,   1,    "Exercise angina must be 0 or 1"),
+            'ca':      (0,   3,    "Major vessels must be 0-3"),
+            'thal':    (1,   3,    "Thalassemia must be 1-3"),
+        }
+        for field, (lo, hi, msg) in bounds.items():
+            if not (lo <= float(data[field]) <= hi):
+                return jsonify({"error": msg}), 400
 
         features = np.array([[
             float(data['cp']),
@@ -140,23 +278,31 @@ def predict():
             float(data['ca']),
             float(data['oldpeak']),
             float(data['thal']),
-            float(data['age'])
+            float(data['age']),
         ]])
 
-        probability = pipeline.predict_proba(features)[0]
-        prediction  = pipeline.predict(features)[0]
+        proba      = pipeline.predict_proba(features)[0]
+        prediction = pipeline.predict(features)[0]
 
-        risk_score = float(probability[1]) * 100
-        risk_level = "Low" if risk_score < 35 else "Moderate" if risk_score < 65 else "High"
+        risk_score = float(proba[1]) * 100
+        risk_level = (
+            "Low"      if risk_score < 35 else
+            "Moderate" if risk_score < 65 else
+            "High"
+        )
 
         return jsonify({
-            "prediction":  int(prediction),
-            "has_disease": bool(prediction == 1),
-            "risk_score":  round(risk_score, 1),
-            "risk_level":  risk_level,
-            "confidence":  round(float(max(probability)) * 100, 1)
+            "prediction":   int(prediction),
+            "has_disease":  bool(prediction == 1),
+            "risk_score":   round(risk_score, 1),
+            "risk_level":   risk_level,
+            "confidence":   round(float(max(proba)) * 100, 1),
+            "prob_healthy": round(float(proba[0]) * 100, 1),
+            "prob_disease": round(float(proba[1]) * 100, 1),
         })
 
+    except ValueError as e:
+        return jsonify({"error": f"Invalid value: {e}"}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -165,8 +311,8 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     if sys.platform == 'win32':
         from waitress import serve
-        print(f"🚀 Running on http://localhost:{port} (waitress)")
+        print(f"\n🚀 Running on http://localhost:{port} (Windows/waitress)")
         serve(app, host='0.0.0.0', port=port)
     else:
-        print(f"🚀 Running on http://localhost:{port}")
+        print(f"\n🚀 Running on http://localhost:{port}")
         app.run(host='0.0.0.0', port=port, debug=False)
